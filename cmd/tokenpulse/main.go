@@ -28,6 +28,7 @@ import (
 	_ "github.com/tokenpulse-hub/tokenpulse/internal/collector/workbuddy"
 	"github.com/tokenpulse-hub/tokenpulse/internal/collector"
 	"github.com/tokenpulse-hub/tokenpulse/internal/pricing"
+	"github.com/tokenpulse-hub/tokenpulse/internal/proxy"
 	"github.com/tokenpulse-hub/tokenpulse/internal/scan"
 	"github.com/tokenpulse-hub/tokenpulse/internal/store"
 	"github.com/tokenpulse-hub/tokenpulse/internal/web"
@@ -64,6 +65,8 @@ func run(args []string) error {
 		return cmdModels(dbPath)
 	case "serve":
 		return cmdServe(dbPath, rest)
+	case "proxy":
+		return cmdProxy(dbPath, rest)
 	case "version", "--version":
 		fmt.Printf("tokenpulse %s\n", version)
 		return nil
@@ -300,6 +303,83 @@ func cmdServe(dbPath string, args []string) error {
 	return srv.ListenAndServe()
 }
 
+// ---------- proxy：本地代理网关 ----------
+
+func cmdProxy(dbPath string, args []string) error {
+	fs := flag.NewFlagSet("proxy", flag.ContinueOnError)
+	port := fs.Int("port", 8421, "代理网关监听端口")
+	defaultUpstream := fs.String("upstream", "", "默认上游名称")
+	upstreamURL := fs.String("url", "", "默认上游 API 地址（如 https://api.deepseek.com）")
+	upstreamToken := fs.String("token", "", "默认上游 API Key（可选，留空则透传客户端 Authorization）")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	st, err := mustOpen(dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	// 构建上游列表
+	upstreams := map[string]*proxy.Upstream{}
+	if *upstreamURL != "" {
+		name := *defaultUpstream
+		if name == "" {
+			name = "default"
+		}
+		upstreams[name] = &proxy.Upstream{
+			Name:    name,
+			BaseURL: *upstreamURL,
+			Token:   *upstreamToken,
+		}
+		fmt.Printf("TokenPulse 代理网关已配置上游 %s → %s\n", name, *upstreamURL)
+	}
+
+	// 如果没有指定上游，提示用法
+	if len(upstreams) == 0 {
+		fmt.Println("提示：未指定上游。请用 --url 和 --upstream 指定，例如：")
+		fmt.Println("  tokenpulse proxy --upstream deepseek --url https://api.deepseek.com --token sk-xxx")
+		fmt.Println("  tokenpulse proxy --upstream openai --url https://api.openai.com")
+		fmt.Println()
+		fmt.Println("客户端只需把 base_url 指向 http://127.0.0.1:8421/v1/<upstream>")
+		fmt.Println("代理会透明转发请求并在响应中提取 token 用量自动入库。")
+		return nil
+	}
+
+	cfg := proxy.Config{
+		ListenAddr: fmt.Sprintf(":%d", *port),
+		Upstreams:  upstreams,
+		Default:    func() string {
+			if *defaultUpstream != "" {
+				return *defaultUpstream
+			}
+			for k := range upstreams {
+				return k
+			}
+			return ""
+		}(),
+	}
+
+	gw := proxy.New(st, cfg, func() *pricing.Table {
+		t, err := pricing.LoadWithOverrides(pricing.CustomPath())
+		if err != nil {
+			return nil
+		}
+		return t
+	})
+
+	addr := fmt.Sprintf("127.0.0.1:%d", *port)
+	fmt.Printf("TokenPulse 代理网关已启动：http://%s  （Ctrl+C 退出）\n", addr)
+	fmt.Printf("客户端配置：base_url = http://%s/v1/%s\n", addr, cfg.Default)
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           gw.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	return srv.ListenAndServe()
+}
+
 // ---------- 工具函数 ----------
 
 func usage() error {
@@ -310,7 +390,8 @@ func usage() error {
   tokenpulse status             查看今日/本周/本月汇总
   tokenpulse top                本月项目 TOP5
   tokenpulse models             本月模型成本明细
-  tokenpulse serve [--port N]   启动 Web 面板（默认 :8420，--auto-scan 1h 定时扫描，0 关闭）
+  tokenpulse serve [--port N]   启动 Web 面板（默认 :8420）
+  tokenpulse proxy [--port N]    启动本地代理网关（默认 :8421）
   tokenpulse version            显示版本
 
 全局参数：
