@@ -1,0 +1,12 @@
+# 构建产物
+/tokenpulse
+tokenpulse-*
+
+# 本地数据库
+*.db
+*.db-wal
+*.db-shm
+
+# 临时与测试
+.temp/
+*.log

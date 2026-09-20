@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TokenPulse — AI 消费记账本</title>
+<style>
+:root {
+  --bg: #f6f8fb; --card: #ffffff; --card2: #fcfdfe;
+  --text: #0f172a; --muted: #64748b; --accent: #2563eb; --accent2: #3b82f6;
+  --green: #059669; --border: #e2e8f0;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  background: linear-gradient(160deg, #f8fafc 0%, #f2f5f9 55%, #eef2f7 100%);
+  color: var(--text); min-height: 100vh; padding: 32px 24px;
+}
+.wrap { max-width: 1080px; margin: 0 auto; }
+header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 24px; }
+header h1 { font-size: 24px; letter-spacing: 1px; }
+header h1 span { color: var(--accent); }
+header .tag { font-size: 12px; color: var(--muted); }
+header .controls { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+header .refresh {
+  background: var(--card); border: 1px solid var(--border);
+  color: var(--muted); padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 12px;
+  box-shadow: 0 1px 2px rgba(15,23,42,.04);
+}
+header .refresh:hover { color: var(--accent); border-color: var(--accent); }
+header .refresh:disabled { opacity: .6; cursor: default; }
+.scan-state {
+  font-size: 12px; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); user-select: none; background: var(--card);
+  box-shadow: 0 1px 2px rgba(15,23,42,.04);
+}
+.scan-state.on { color: var(--green); border-color: rgba(5,150,105,.4); background: rgba(5,150,105,.06); }
+.scan-state.off { color: var(--muted); }
+.tool-bar { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+.tool-tab {
+  padding: 7px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;
+  border: 1px solid var(--border); background: var(--card); color: var(--muted);
+  transition: all .15s; user-select: none; white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(15,23,42,.04);
+}
+.tool-tab:hover { color: var(--accent); border-color: var(--accent); }
+.tool-tab.active {
+  color: #fff; background: linear-gradient(135deg, var(--accent2), var(--accent));
+  border-color: transparent; font-weight: 600;
+}
+.tool-tab .cnt { font-size: 11px; opacity: .7; margin-left: 4px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  padding: 20px 22px; border-top: 3px solid var(--accent);
+  box-shadow: 0 1px 3px rgba(15,23,42,.05);
+}
+.card .label { font-size: 12px; color: var(--muted); letter-spacing: 2px; margin-bottom: 10px; }
+.card .cost { font-size: 30px; font-weight: 800; color: var(--text); }
+.card .cost em { font-style: normal; font-size: 14px; color: var(--muted); margin-left: 4px; }
+.card .tokens { font-size: 13px; color: var(--accent); margin-top: 6px; }
+.card .calls { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.grid2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
+@media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+.panel {
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  padding: 20px; margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(15,23,42,.05);
+}
+.panel h2 { font-size: 15px; color: #334155; margin-bottom: 14px; letter-spacing: 1px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+td { padding: 9px 10px; border-bottom: 1px solid #f1f5f9; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: rgba(37,99,235,.035); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td .model { color: var(--text); font-weight: 600; }
+td .unpriced { font-size: 11px; color: #d97706; margin-left: 8px; }
+.bars { display: flex; align-items: flex-end; gap: 3px; height: 90px; padding: 4px 0; }
+.bars .b { flex: 1; min-height: 2px; border-radius: 3px 3px 0 0; background: linear-gradient(180deg, #60a5fa, #bfdbfe); position: relative; transition: filter .15s; }
+.bars .b:hover { filter: brightness(1.08); }
+.bars .b:hover::after {
+  content: attr(data-tip); position: absolute; bottom: calc(100% + 6px); left: 50%;
+  transform: translateX(-50%); background: var(--card); border: 1px solid var(--border);
+  color: var(--text); font-size: 11px; padding: 4px 8px; border-radius: 6px; white-space: nowrap; z-index: 2;
+  box-shadow: 0 4px 12px rgba(15,23,42,.12);
+}
+.axis { display: flex; gap: 3px; margin-top: 6px; }
+.axis span { flex: 1; text-align: center; font-size: 10px; color: var(--muted); }
+.empty { color: var(--muted); font-size: 13px; text-align: center; padding: 28px 0; }
+footer { text-align: center; color: var(--muted); font-size: 11px; margin-top: 28px; }
+footer a { color: var(--accent); text-decoration: none; }
+
+/* ===== 定价管理 ===== */
+.pricing-scroll { max-height: 320px; overflow-y: auto; }
+.src-tag { font-size: 10px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.src-tag.builtin { color: var(--muted); border: 1px solid var(--border); background: #f8fafc; }
+.src-tag.custom { color: var(--green); border: 1px solid rgba(5,150,105,.35); background: rgba(5,150,105,.07); }
+.btn-mini {
+  background: var(--card); border: 1px solid var(--border); color: var(--muted);
+  padding: 3px 10px; border-radius: 6px; cursor: pointer; font-size: 11px; margin-left: 6px;
+}
+.btn-mini:hover { color: var(--accent); border-color: var(--accent); }
+.btn-mini.danger:hover { color: #dc2626; border-color: #dc2626; }
+.unpriced-box { margin-bottom: 12px; }
+.unpriced-item {
+  display: inline-flex; align-items: center; gap: 8px; margin: 4px 6px 4px 0; padding: 6px 12px;
+  border: 1px solid rgba(217,119,6,.4); background: rgba(245,158,11,.07);
+  border-radius: 8px; font-size: 12px;
+}
+.unpriced-item .name { color: #b45309; font-weight: 600; }
+.unpriced-item .tok { color: var(--muted); font-size: 11px; }
+.pricing-form {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 14px;
+  padding: 12px; border: 1px dashed var(--border); border-radius: 10px; background: #f8fafc;
+}
+.pricing-form label { font-size: 11px; color: var(--muted); }
+.pricing-form input {
+  background: #ffffff; border: 1px solid var(--border); color: var(--text);
+  padding: 6px 10px; border-radius: 6px; font-size: 12px; width: 90px;
+}
+.pricing-form input#pfName { width: 200px; }
+.pricing-form input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent2), var(--accent)); color: #fff;
+  border: none; padding: 7px 18px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 600;
+}
+.btn-primary:disabled { opacity: .6; cursor: default; }
+.btn-plain {
+  background: var(--card); border: 1px solid var(--border); color: var(--muted);
+  padding: 7px 14px; border-radius: 8px; cursor: pointer; font-size: 12px;
+}
+.btn-plain:hover { color: var(--text); border-color: var(--accent); }
+.form-hint { width: 100%; font-size: 11px; color: var(--muted); }
+.form-hint b { color: #b45309; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Token<span>Pulse</span></h1>
+    <span class="tag">AI 消费记账本 · 本月维度</span>
+    <div class="controls">
+      <span id="autoScanState" class="scan-state off" onclick="toggleAutoScan()" title="点击切换自动扫描开关">自动扫描：加载中</span>
+      <button id="scanNowBtn" class="refresh" onclick="scanNow()">立即扫描</button>
+      <button class="refresh" onclick="load()">刷新</button>
+    </div>
+  </header>
+
+  <div class="tool-bar" id="toolBar"><span class="tool-tab active">加载中…</span></div>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h2>最近 30 天趋势（总 Token）</h2>
+      <div id="trend"><div class="empty">加载中…</div></div>
+    </div>
+    <div class="panel">
+      <h2>项目 TOP（本月）</h2>
+      <div id="projects"><div class="empty">加载中…</div></div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h2>模型明细（本月）</h2>
+      <div id="models"><div class="empty">加载中…</div></div>
+    </div>
+    <div class="panel">
+      <h2>工具分布（本月）</h2>
+      <div id="tools"><div class="empty">加载中…</div></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>模型定价管理 · 单位 $/1M tokens · 自定义价格优先于内置表</h2>
+    <div id="unpricedBox" class="unpriced-box"></div>
+    <div id="pricing" class="pricing-scroll"><div class="empty">加载中…</div></div>
+    <div class="pricing-form">
+      <label>模型/前缀</label>
+      <input id="pfName" placeholder="如 chat-pro（支持前缀匹配）">
+      <label>输入</label><input id="pfIn" type="number" step="0.0001" min="0" placeholder="0">
+      <label>输出</label><input id="pfOut" type="number" step="0.0001" min="0" placeholder="0">
+      <label>缓存读</label><input id="pfCr" type="number" step="0.0001" min="0" placeholder="0">
+      <label>缓存写</label><input id="pfCw" type="number" step="0.0001" min="0" placeholder="0">
+      <button id="pfSaveBtn" class="btn-primary" onclick="savePrice()">保存并重算</button>
+      <button class="btn-plain" onclick="clearPriceForm()">清空</button>
+      <div class="form-hint">提示：改价/补价后自动<b>全量重算历史成本</b>；价格为 0 也算已定价；删除自定义条目即恢复内置价。文件位置 ~/.tokenpulse/pricing.json</div>
+    </div>
+  </div>
+
+  <footer>TokenPulse v0.2 · 数据仅存本机 · <a href="https://github.com/tokenpulse-hub/tokenpulse" target="_blank">GitHub</a></footer>
+</div>
+
+<script>
+let currentTool = ''; // 当前筛选的工具（空=全部）
+const toolLabels = {
+  'claude-code': 'Claude Code',
+  'teleagent': 'TeleAgent',
+  'codex': 'Codex CLI',
+  'gemini-cli': 'Gemini CLI',
+  'cursor': 'Cursor',
+  'opencode': 'OpenCode',
+  'workbuddy': 'WorkBuddy',
+};
+function toolLabel(t) { return toolLabels[t] || t; }
+
+function fmtTokens(n) {
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return String(n);
+}
+function fmtUSD(c) {
+  if (c === 0) return '$0.00';
+  if (c < 0.01) return '$' + c.toFixed(4);
+  return '$' + c.toFixed(2);
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ===== 扫描控制 =====
+function fmtInterval(sec) {
+  if (sec >= 3600 && sec % 3600 === 0) return (sec / 3600) + 'h';
+  if (sec >= 60) return Math.round(sec / 60) + 'm';
+  return sec + 's';
+}
+function renderAutoScan(a) {
+  const el = document.getElementById('autoScanState');
+  if (!a) { el.textContent = '自动扫描：未知'; el.className = 'scan-state off'; return; }
+  const iv = a.interval_sec > 0 ? fmtInterval(a.interval_sec) : '';
+  el.textContent = a.enabled ? ('自动扫描：开' + (iv ? '（每' + iv + '）' : '')) : '自动扫描：关';
+  el.className = 'scan-state ' + (a.enabled ? 'on' : 'off');
+}
+async function toggleAutoScan() {
+  const el = document.getElementById('autoScanState');
+  const target = !el.classList.contains('on');
+  el.style.opacity = .6;
+  try {
+    const res = await fetch('/api/scanner/toggle', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: target })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    renderAutoScan(await res.json());
+  } catch (e) { el.textContent = '切换失败'; }
+  el.style.opacity = 1;
+}
+async function scanNow() {
+  const btn = document.getElementById('scanNowBtn');
+  btn.disabled = true; btn.textContent = '扫描中…';
+  try {
+    const res = await fetch('/api/scan', { method: 'POST' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const r = await res.json();
+    btn.textContent = r.added > 0 ? ('新增 ' + r.added + ' 条') : '无新增';
+    load();
+  } catch (e) { btn.textContent = '扫描失败'; }
+  setTimeout(() => { btn.disabled = false; btn.textContent = '立即扫描'; }, 2000);
+}
+
+function rangeCard(r) {
+  const label = { today: '今日', week: '本周', month: '本月' }[r.label] || r.label;
+  return `<div class="card">
+    <div class="label">${label} · 按 API 价折算</div>
+    <div class="cost">${fmtUSD(r.cost_usd)}<em>USD</em></div>
+    <div class="tokens">${fmtTokens(r.total_tokens)} tokens</div>
+    <div class="calls">${r.calls} 次调用 · 输入 ${fmtTokens(r.input_tokens)} / 输出 ${fmtTokens(r.output_tokens)} / 缓存 ${fmtTokens(r.cache_tokens)}</div>
+  </div>`;
+}
+
+function bucketTable(rows, isModel) {
+  if (!rows || rows.length === 0) return '<div class="empty">暂无数据 · 先运行 tokenpulse scan</div>';
+  let html = '<table><tr><th>' + (isModel ? '模型' : '名称') + '</th><th class="num">Tokens</th><th class="num">成本</th><th class="num">调用</th></tr>';
+  for (const b of rows) {
+    const unpriced = isModel && b.cost_usd === 0 ? '<span class="unpriced">未定价</span>' : '';
+    html += `<tr><td><span class="model">${esc(b.name || '(unknown)')}</span>${unpriced}</td>
+      <td class="num">${fmtTokens(b.total_tokens)}</td>
+      <td class="num">${fmtUSD(b.cost_usd)}</td>
+      <td class="num">${b.calls}</td></tr>`;
+  }
+  return html + '</table>';
+}
+
+function trendChart(points) {
+  if (!points || points.length === 0) return '<div class="empty">暂无数据</div>';
+  const max = Math.max(...points.map(p => p.total_tokens), 1);
+  let bars = '', axis = '';
+  for (const p of points) {
+    const h = Math.max((p.total_tokens / max) * 100, p.total_tokens > 0 ? 3 : 1);
+    const short = p.day.slice(5).replace('-', '/');
+    bars += `<div class="b" style="height:${h}%" data-tip="${p.day} · ${fmtTokens(p.total_tokens)} tok · ${fmtUSD(p.cost_usd)}"></div>`;
+    axis += `<span>${short}</span>`;
+  }
+  return `<div class="bars">${bars}</div><div class="axis">${axis}</div>`;
+}
+
+async function loadTools() {
+  try {
+    const res = await fetch('/api/tools');
+    if (!res.ok) return;
+    const tools = await res.json();
+    const bar = document.getElementById('toolBar');
+    let html = `<span class="tool-tab ${currentTool === '' ? 'active' : ''}" onclick="selectTool('')">全部</span>`;
+    for (const t of tools) {
+      html += `<span class="tool-tab ${currentTool === t.tool ? 'active' : ''}" onclick="selectTool('${t.tool}')">${toolLabel(t.tool)}<span class="cnt">${fmtTokens(t.total_tokens)}</span></span>`;
+    }
+    bar.innerHTML = html;
+  } catch(e) {}
+}
+function selectTool(t) {
+  currentTool = t;
+  load();
+  loadTools();
+}
+
+async function load() {
+  try {
+    const url = currentTool ? '/api/summary?tool=' + encodeURIComponent(currentTool) : '/api/summary';
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    document.getElementById('cards').innerHTML = rangeCard(d.today) + rangeCard(d.week) + rangeCard(d.month);
+    document.getElementById('trend').innerHTML = trendChart(d.trend);
+    document.getElementById('projects').innerHTML = bucketTable(d.projects, false);
+    document.getElementById('models').innerHTML = bucketTable(d.models, true);
+    document.getElementById('tools').innerHTML = bucketTable(d.tools, false);
+    renderAutoScan(d.auto_scan);
+  } catch (e) {
+    document.querySelectorAll('.panel > div, #cards').forEach(el => {
+      if (!el.dataset.done) el.innerHTML = '<div class="empty">加载失败：' + e.message + '</div>';
+    });
+  }
+}
+// ===== 定价管理 =====
+let pricingModels = [];   // GET /api/pricing 返回的定价条目（索引即操作句柄）
+let unpricedModels = [];  // 库内未定价模型
+
+async function loadPricing() {
+  try {
+    const res = await fetch('/api/pricing');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    pricingModels = d.models || [];
+    unpricedModels = d.unpriced || [];
+    renderPricing();
+  } catch (e) {
+    document.getElementById('pricing').innerHTML = '<div class="empty">加载失败：' + e.message + '</div>';
+  }
+}
+
+function renderPricing() {
+  // 未定价模型（库内出现过、定价表没覆盖 → 成本按 0 漏计）
+  const ub = document.getElementById('unpricedBox');
+  if (unpricedModels.length) {
+    let h = '';
+    for (let i = 0; i < unpricedModels.length; i++) {
+      const u = unpricedModels[i];
+      h += `<span class="unpriced-item"><span class="name">${esc(u.name)}</span>` +
+        `<span class="tok">${fmtTokens(u.tokens)} tokens · ${u.calls} 次调用未计价</span>` +
+        `<button class="btn-mini" onclick="fillPriceForm(${i})">补定价</button></span>`;
+    }
+    ub.innerHTML = h;
+  } else {
+    ub.innerHTML = '';
+  }
+
+  if (!pricingModels.length) {
+    document.getElementById('pricing').innerHTML = '<div class="empty">暂无定价条目</div>';
+    return;
+  }
+  let html = '<table><tr><th>模型/前缀</th><th class="num">输入</th><th class="num">输出</th>' +
+    '<th class="num">缓存读</th><th class="num">缓存写</th><th>来源</th><th>操作</th></tr>';
+  for (let i = 0; i < pricingModels.length; i++) {
+    const m = pricingModels[i];
+    const src = m.source === 'custom'
+      ? '<span class="src-tag custom">自定义</span>'
+      : '<span class="src-tag builtin">内置</span>';
+    let ops = `<button class="btn-mini" onclick="editPrice(${i})">改价</button>`;
+    if (m.source === 'custom') {
+      ops += `<button class="btn-mini danger" onclick="deletePrice(${i})">恢复内置</button>`;
+    }
+    html += `<tr><td><span class="model">${esc(m.name)}</span></td>` +
+      `<td class="num">$${m.input}</td><td class="num">$${m.output}</td>` +
+      `<td class="num">$${m.cache_read}</td><td class="num">$${m.cache_write}</td>` +
+      `<td>${src}</td><td>${ops}</td></tr>`;
+  }
+  document.getElementById('pricing').innerHTML = html + '</table>';
+}
+
+function fillPriceForm(i) {
+  const u = unpricedModels[i];
+  pfName.value = u.name;
+  pfIn.value = ''; pfOut.value = ''; pfCr.value = ''; pfCw.value = '';
+  pfName.focus();
+}
+function editPrice(i) {
+  const m = pricingModels[i];
+  pfName.value = m.name;
+  pfIn.value = m.input;
+  pfOut.value = m.output;
+  pfCr.value = m.cache_read;
+  pfCw.value = m.cache_write;
+  pfName.focus();
+}
+function clearPriceForm() {
+  ['pfName', 'pfIn', 'pfOut', 'pfCr', 'pfCw'].forEach(id => document.getElementById(id).value = '');
+}
+const pfName = document.getElementById('pfName'),
+      pfIn = document.getElementById('pfIn'),
+      pfOut = document.getElementById('pfOut'),
+      pfCr = document.getElementById('pfCr'),
+      pfCw = document.getElementById('pfCw');
+
+async function savePrice() {
+  const name = pfName.value.trim();
+  if (!name) { alert('请填写模型名'); return; }
+  const body = {
+    name,
+    input: +pfIn.value || 0,
+    output: +pfOut.value || 0,
+    cache_read: +pfCr.value || 0,
+    cache_write: +pfCw.value || 0,
+  };
+  const btn = document.getElementById('pfSaveBtn');
+  btn.disabled = true; btn.textContent = '保存中…';
+  try {
+    const res = await fetch('/api/pricing', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const r = await res.json();
+    btn.textContent = '已重算 ' + r.recalculated + ' 条';
+    loadPricing();
+    load(); // 成本全量重算，主面板数字也要刷新
+  } catch (e) {
+    btn.textContent = '保存失败';
+  }
+  setTimeout(() => { btn.disabled = false; btn.textContent = '保存并重算'; }, 2500);
+}
+
+async function deletePrice(i) {
+  const m = pricingModels[i];
+  if (!confirm('删除自定义价格「' + m.name + '」并恢复内置价？')) return;
+  try {
+    const res = await fetch('/api/pricing', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: m.name })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    loadPricing();
+    load();
+  } catch (e) {
+    alert('删除失败：' + e.message);
+  }
+}
+
+loadTools();
+load();
+loadPricing();
+setInterval(load, 60000); // 每分钟自动刷新
+</script>
+</body>
+</html>
