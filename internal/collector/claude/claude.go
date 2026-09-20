@@ -132,9 +132,10 @@ func (a *Adapter) Parse(path string) ([]model.UsageEvent, error) {
 			Model:        line.Message.Model,
 			Project:      project,
 			SessionID:    session,
-			InputTokens:  u.InputTokens,
-			OutputTokens: u.OutputTokens,
-			CacheTokens:  u.CacheReadInputTokens + u.CacheCreationInputTokens,
+			InputTokens:     u.InputTokens,
+			OutputTokens:    u.OutputTokens,
+			CacheReadTokens:  u.CacheReadInputTokens,
+			CacheWriteTokens: u.CacheCreationInputTokens,
 		}
 		events = append(events, ev)
 	}

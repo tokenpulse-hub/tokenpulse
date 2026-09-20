@@ -158,7 +158,8 @@ func parseJSONL(path string) ([]model.UsageEvent, error) {
 			SessionID:    session,
 			InputTokens:  in,
 			OutputTokens: u.CandidatesTokens,
-			CacheTokens:  u.CachedTokens,
+			CacheReadTokens:  u.CachedTokens,
+			CacheWriteTokens: 0,
 		})
 	}
 	return events, sc.Err()
@@ -207,7 +208,8 @@ func parseJSON(path string) ([]model.UsageEvent, error) {
 			SessionID:    session,
 			InputTokens:  in,
 			OutputTokens: u.CandidatesTokens,
-			CacheTokens:  u.CachedTokens,
+			CacheReadTokens:  u.CachedTokens,
+			CacheWriteTokens: 0,
 		})
 	}
 	return events, nil

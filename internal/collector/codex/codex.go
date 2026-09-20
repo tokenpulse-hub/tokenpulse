@@ -154,9 +154,10 @@ func (a *Adapter) Parse(path string) ([]model.UsageEvent, error) {
 					Model:        state.model,
 					Project:      project,
 					SessionID:    state.session,
-					InputTokens:  line.Payload.Input,
-					OutputTokens: line.Payload.Output,
-					CacheTokens:  line.Payload.CacheRead,
+					InputTokens:     line.Payload.Input,
+					OutputTokens:    line.Payload.Output,
+					CacheReadTokens:  line.Payload.CacheRead,
+					CacheWriteTokens: 0,
 				})
 			}
 		}

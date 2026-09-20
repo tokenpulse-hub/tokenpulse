@@ -38,16 +38,17 @@ func Open(path string) (*Store, error) {
 func (s *Store) migrate() error {
 	const ddl = `
 CREATE TABLE IF NOT EXISTS usage_events (
-  event_id      TEXT PRIMARY KEY,
-  ts            TEXT NOT NULL,
-  tool          TEXT NOT NULL,
-  model         TEXT NOT NULL,
-  project       TEXT NOT NULL,
-  session_id    TEXT NOT NULL,
-  input_tokens  INTEGER NOT NULL DEFAULT 0,
-  output_tokens INTEGER NOT NULL DEFAULT 0,
-  cache_tokens  INTEGER NOT NULL DEFAULT 0,
-  cost_usd      REAL NOT NULL DEFAULT 0
+  event_id          TEXT PRIMARY KEY,
+  ts                TEXT NOT NULL,
+  tool              TEXT NOT NULL,
+  model             TEXT NOT NULL,
+  project           TEXT NOT NULL,
+  session_id        TEXT NOT NULL,
+  input_tokens      INTEGER NOT NULL DEFAULT 0,
+  output_tokens     INTEGER NOT NULL DEFAULT 0,
+  cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+  cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+  cost_usd          REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_usage_ts      ON usage_events(ts);
 CREATE INDEX IF NOT EXISTS idx_usage_tool    ON usage_events(tool);
@@ -56,6 +57,15 @@ CREATE INDEX IF NOT EXISTS idx_usage_project ON usage_events(project);
 `
 	if _, err := s.db.Exec(ddl); err != nil {
 		return fmt.Errorf("store: migrate: %w", err)
+	}
+	// 兼容旧 schema：如果旧表有 cache_tokens 列而无 cache_read/write，添加新列。
+	// ALTER TABLE ADD COLUMN 在列已存在时报错，用 try-ignore 方式处理。
+	for _, col := range []string{"cache_read_tokens", "cache_write_tokens"} {
+		var exists int
+		s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('usage_events') WHERE name = ?`, col).Scan(&exists)
+		if exists == 0 {
+			s.db.Exec(fmt.Sprintf(`ALTER TABLE usage_events ADD COLUMN %s INTEGER NOT NULL DEFAULT 0`, col))
+		}
 	}
 	return nil
 }
@@ -101,16 +111,18 @@ func (s *Store) RecalcCosts(t *pricing.Table) (int64, error) {
 	defer tx.Rollback()
 
 	var affected int64
-	// 与 scan 时的折算口径一致：CacheTokens 按 cache_read 单价计，cache_write 按 0。
+	// cache_read 和 cache_write 分别按各自单价计。
 	const perM = 1000000.0
 	for _, m := range models {
 		p, ok := t.Match(m)
 		var res sql.Result
 		if ok {
 			res, err = tx.Exec(`UPDATE usage_events SET cost_usd =
-				input_tokens/?*? + output_tokens/?*? + cache_tokens/?*?
+				input_tokens/?*? + output_tokens/?*? +
+				cache_read_tokens/?*? + cache_write_tokens/?*?
 				WHERE model = ?`,
-				perM, p.Input, perM, p.Output, perM, p.CacheRead, m)
+				perM, p.Input, perM, p.Output,
+				perM, p.CacheRead, perM, p.CacheWrite, m)
 		} else {
 			res, err = tx.Exec(`UPDATE usage_events SET cost_usd = 0 WHERE model = ?`, m)
 		}
@@ -141,14 +153,14 @@ func (s *Store) InsertEvents(events []model.UsageEvent) (int64, error) {
 
 	const q = `INSERT OR IGNORE INTO usage_events
 		(event_id, ts, tool, model, project, session_id,
-		 input_tokens, output_tokens, cache_tokens, cost_usd)
-		VALUES (?,?,?,?,?,?,?,?,?,?)`
+		 input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)`
 	var inserted int64
 	for _, e := range events {
 		res, err := tx.Exec(q,
 			e.EventID, e.Timestamp.UTC().Format(time.RFC3339Nano),
 			e.Tool, e.Model, e.Project, e.SessionID,
-			e.InputTokens, e.OutputTokens, e.CacheTokens, e.CostUSD)
+			e.InputTokens, e.OutputTokens, e.CacheReadTokens, e.CacheWriteTokens, e.CostUSD)
 		if err != nil {
 			return 0, fmt.Errorf("store: insert %s: %w", e.EventID, err)
 		}
@@ -164,13 +176,14 @@ func (s *Store) InsertEvents(events []model.UsageEvent) (int64, error) {
 
 // Range 是一个时间区间内的聚合结果。
 type Range struct {
-	Label        string  `json:"label"` // today / week / month
-	InputTokens  int64   `json:"input_tokens"`
-	OutputTokens int64   `json:"output_tokens"`
-	CacheTokens  int64   `json:"cache_tokens"`
-	TotalTokens  int64   `json:"total_tokens"`
-	CostUSD      float64 `json:"cost_usd"`
-	Calls        int64   `json:"calls"`
+	Label           string  `json:"label"` // today / week / month
+	InputTokens     int64   `json:"input_tokens"`
+	OutputTokens    int64   `json:"output_tokens"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
+	TotalTokens     int64   `json:"total_tokens"`
+	CostUSD         float64 `json:"cost_usd"`
+	Calls           int64   `json:"calls"`
 }
 
 // Summary 返回今日 / 本周（周一起） / 本自然月三个区间的聚合。
@@ -198,7 +211,8 @@ func (s *Store) Summary(now time.Time, tool string) (today, week, month Range, e
 func (s *Store) rangeAgg(label string, from, to time.Time, tool string) (Range, error) {
 	q := `SELECT
 		COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
-		COALESCE(SUM(cache_tokens),0), COALESCE(SUM(cost_usd),0), COUNT(*)
+		COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_write_tokens),0),
+		COALESCE(SUM(cost_usd),0), COUNT(*)
 		FROM usage_events WHERE ts >= ? AND ts < ?`
 	args := []any{from.UTC().Format(time.RFC3339Nano), to.UTC().Format(time.RFC3339Nano)}
 	if tool != "" {
@@ -207,21 +221,22 @@ func (s *Store) rangeAgg(label string, from, to time.Time, tool string) (Range, 
 	}
 	var r Range
 	err := s.db.QueryRow(q, args...).
-		Scan(&r.InputTokens, &r.OutputTokens, &r.CacheTokens, &r.CostUSD, &r.Calls)
+		Scan(&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheWriteTokens, &r.CostUSD, &r.Calls)
 	r.Label = label
-	r.TotalTokens = r.InputTokens + r.OutputTokens + r.CacheTokens
+	r.TotalTokens = r.InputTokens + r.OutputTokens + r.CacheReadTokens + r.CacheWriteTokens
 	return r, err
 }
 
 // Bucket 是按模型或项目的聚合桶。
 type Bucket struct {
-	Name         string  `json:"name"`
-	InputTokens  int64   `json:"input_tokens"`
-	OutputTokens int64   `json:"output_tokens"`
-	CacheTokens  int64   `json:"cache_tokens"`
-	TotalTokens  int64   `json:"total_tokens"`
-	CostUSD      float64 `json:"cost_usd"`
-	Calls        int64   `json:"calls"`
+	Name            string  `json:"name"`
+	InputTokens     int64   `json:"input_tokens"`
+	OutputTokens    int64   `json:"output_tokens"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
+	TotalTokens     int64   `json:"total_tokens"`
+	CostUSD         float64 `json:"cost_usd"`
+	Calls           int64   `json:"calls"`
 }
 
 // GroupBy 返回指定起始时间之后、按指定维度（"model"/"project"/"tool"）的聚合，
@@ -233,8 +248,9 @@ func (s *Store) GroupBy(dimension string, from time.Time, limit int, tool string
 		return nil, fmt.Errorf("store: invalid dimension %q", dimension)
 	}
 	q := `SELECT %s,
-		SUM(input_tokens), SUM(output_tokens), SUM(cache_tokens),
-		SUM(input_tokens)+SUM(output_tokens)+SUM(cache_tokens),
+		SUM(input_tokens), SUM(output_tokens),
+		SUM(cache_read_tokens), SUM(cache_write_tokens),
+		SUM(input_tokens)+SUM(output_tokens)+SUM(cache_read_tokens)+SUM(cache_write_tokens),
 		SUM(cost_usd), COUNT(*)
 		FROM usage_events WHERE ts >= ?`
 	args := []any{from.UTC().Format(time.RFC3339Nano)}
@@ -252,7 +268,8 @@ func (s *Store) GroupBy(dimension string, from time.Time, limit int, tool string
 	var out []Bucket
 	for rows.Next() {
 		var b Bucket
-		if err := rows.Scan(&b.Name, &b.InputTokens, &b.OutputTokens, &b.CacheTokens,
+		if err := rows.Scan(&b.Name, &b.InputTokens, &b.OutputTokens,
+			&b.CacheReadTokens, &b.CacheWriteTokens,
 			&b.TotalTokens, &b.CostUSD, &b.Calls); err != nil {
 			return nil, err
 		}
@@ -278,7 +295,7 @@ func (s *Store) DailyTrend(now time.Time, days int, tool string) ([]DayPoint, er
 	today := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, local.Location())
 
 	q := `SELECT
-		date(ts, 'localtime'), SUM(input_tokens)+SUM(output_tokens)+SUM(cache_tokens), SUM(cost_usd)
+		date(ts, 'localtime'), SUM(input_tokens)+SUM(output_tokens)+SUM(cache_read_tokens)+SUM(cache_write_tokens), SUM(cost_usd)
 		FROM usage_events WHERE ts >= ?`
 	args := []any{today.AddDate(0, 0, -(days - 1)).UTC().Format(time.RFC3339Nano)}
 	if tool != "" {
@@ -330,7 +347,7 @@ func (s *Store) DistinctTools(now time.Time) ([]ToolStat, error) {
 	local := now.Local()
 	monthStart := time.Date(local.Year(), local.Month(), 1, 0, 0, 0, 0, local.Location())
 	rows, err := s.db.Query(`SELECT tool,
-		SUM(input_tokens)+SUM(output_tokens)+SUM(cache_tokens), COUNT(*)
+		SUM(input_tokens)+SUM(output_tokens)+SUM(cache_read_tokens)+SUM(cache_write_tokens), COUNT(*)
 		FROM usage_events WHERE ts >= ?
 		GROUP BY tool ORDER BY 2 DESC`,
 		monthStart.UTC().Format(time.RFC3339Nano))

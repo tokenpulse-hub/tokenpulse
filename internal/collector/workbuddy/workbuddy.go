@@ -161,9 +161,10 @@ func (a *Adapter) Parse(path string) ([]model.UsageEvent, error) {
 				Model:        modelName,
 				Project:      project,
 				SessionID:    tf.Trace.SessionID,
-				InputTokens:  resp.Usage.PromptTokens,
-				OutputTokens: resp.Usage.CompletionTokens,
-				CacheTokens:  resp.Usage.PromptTokensDetails.CachedTokens,
+				InputTokens:     resp.Usage.PromptTokens,
+				OutputTokens:    resp.Usage.CompletionTokens,
+				CacheReadTokens:  resp.Usage.PromptTokensDetails.CachedTokens,
+				CacheWriteTokens: 0,
 			})
 		}
 	}

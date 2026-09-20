@@ -36,7 +36,7 @@ func Run(st *store.Store) (int64, error) {
 			for i := range events {
 				events[i].CostUSD = table.Cost(events[i].Model,
 					events[i].InputTokens, events[i].OutputTokens,
-					events[i].CacheTokens, 0)
+					events[i].CacheReadTokens, events[i].CacheWriteTokens)
 			}
 			batch = append(batch, events...)
 		}

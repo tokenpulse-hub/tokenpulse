@@ -116,9 +116,10 @@ func (a *Adapter) Parse(path string) ([]model.UsageEvent, error) {
 			Model:        data.Model,
 			Project:      project,
 			SessionID:    sid,
-			InputTokens:  data.Tokens.Input,
-			OutputTokens: data.Tokens.Output,
-			CacheTokens:  data.Tokens.Cache.Read + data.Tokens.Cache.Write,
+			InputTokens:     data.Tokens.Input,
+			OutputTokens:    data.Tokens.Output,
+			CacheReadTokens:  data.Tokens.Cache.Read,
+			CacheWriteTokens: data.Tokens.Cache.Write,
 		})
 	}
 	return events, rows.Err()

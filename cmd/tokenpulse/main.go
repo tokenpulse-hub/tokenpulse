@@ -164,7 +164,7 @@ func cmdScan(dbPath string, rest []string) error {
 			for i := range events {
 				events[i].CostUSD = table.Cost(events[i].Model,
 					events[i].InputTokens, events[i].OutputTokens,
-					events[i].CacheTokens, 0)
+					events[i].CacheReadTokens, events[i].CacheWriteTokens)
 			}
 			n, err := st.InsertEvents(events)
 			if err != nil {
@@ -204,8 +204,8 @@ func cmdStatus(dbPath string) error {
 		label := map[string]string{"today": "今日", "week": "本周", "month": "本月"}[r.Label]
 		fmt.Printf("%s：%s / %s tokens / %d 次调用\n",
 			label, usd(r.CostUSD), human(r.TotalTokens), r.Calls)
-		fmt.Printf("      输入 %s · 输出 %s · 缓存 %s\n",
-			human(r.InputTokens), human(r.OutputTokens), human(r.CacheTokens))
+		fmt.Printf("      输入 %s · 输出 %s · 缓存读 %s · 缓存写 %s\n",
+			human(r.InputTokens), human(r.OutputTokens), human(r.CacheReadTokens), human(r.CacheWriteTokens))
 	}
 	return nil
 }

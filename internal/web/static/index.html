@@ -265,7 +265,7 @@ function rangeCard(r) {
     <div class="label">${label} · 按 API 价折算</div>
     <div class="cost">${fmtUSD(r.cost_usd)}<em>USD</em></div>
     <div class="tokens">${fmtTokens(r.total_tokens)} tokens</div>
-    <div class="calls">${r.calls} 次调用 · 输入 ${fmtTokens(r.input_tokens)} / 输出 ${fmtTokens(r.output_tokens)} / 缓存 ${fmtTokens(r.cache_tokens)}</div>
+    <div class="calls">${r.calls} 次调用 · 输入 ${fmtTokens(r.input_tokens)} / 输出 ${fmtTokens(r.output_tokens)} / 缓存读 ${fmtTokens(r.cache_read_tokens)} / 缓存写 ${fmtTokens(r.cache_write_tokens)}</div>
   </div>`;
 }
 

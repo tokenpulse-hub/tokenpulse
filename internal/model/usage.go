@@ -16,14 +16,15 @@ type UsageEvent struct {
 	Project   string    `json:"project"` // 归属项目（目录名或会话名）
 	SessionID string    `json:"session_id"`
 
-	InputTokens  int64 `json:"input_tokens"`  // 输入
-	OutputTokens int64 `json:"output_tokens"` // 输出
-	CacheTokens  int64 `json:"cache_tokens"`  // 缓存命中 + 缓存写入
+	InputTokens     int64 `json:"input_tokens"`     // 输入
+	OutputTokens    int64 `json:"output_tokens"`    // 输出
+	CacheReadTokens  int64 `json:"cache_read_tokens"`  // 缓存命中（读）
+	CacheWriteTokens int64 `json:"cache_write_tokens"` // 缓存创建（写）
 
 	CostUSD float64 `json:"cost_usd"` // 按定价表折算的成本（美元）
 }
 
-// TotalTokens 返回总 Token 数（输入 + 输出 + 缓存）。
+// TotalTokens 返回总 Token 数（输入 + 输出 + 缓存读 + 缓存写）。
 func (e UsageEvent) TotalTokens() int64 {
-	return e.InputTokens + e.OutputTokens + e.CacheTokens
+	return e.InputTokens + e.OutputTokens + e.CacheReadTokens + e.CacheWriteTokens
 }
